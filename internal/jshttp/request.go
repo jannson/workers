@@ -51,7 +51,7 @@ func ToJSRequest(req *http.Request) js.Value {
 	jsReqOptions.Set("method", req.Method)
 	jsReqOptions.Set("headers", ToJSHeader(req.Header))
 	jsReqBody := js.Undefined()
-	if req.Body != nil {
+	if req.Body != nil && req.Body != http.NoBody {
 		jsReqBody = jsutil.ConvertReaderToReadableStream(req.Body)
 	}
 	jsReqOptions.Set("body", jsReqBody)

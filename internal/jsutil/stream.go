@@ -210,23 +210,48 @@ func ConvertReaderToReadableStream(reader io.ReadCloser) js.Value {
 func ConvertReaderToFixedLengthStream(rc io.ReadCloser, size int64) js.Value {
 	stream := MaybeFixedLengthStreamClass.New(js.ValueOf(size))
 	go func(writer js.Value) {
+		defer func() {
+			_ = recover()
+		}()
 		defer rc.Close()
 
+		remaining := size
 		chunk := make([]byte, min(size, defaultChunkSize))
-		AwaitPromise(writer.Get("ready"))
-		for {
-			n, err := rc.Read(chunk)
+		for remaining > 0 {
+			toRead := min(int64(len(chunk)), remaining)
+			n, err := rc.Read(chunk[:toRead])
 			if n > 0 {
+				remaining -= int64(n)
+
+				// Backpressure: wait until the writer is ready, then wait for the write to finish.
+				if _, readyErr := awaitPromiseIfSupported(writer.Get("ready")); readyErr != nil {
+					return
+				}
 				b := Uint8ArrayClass.New(n)
 				js.CopyBytesToJS(b, chunk[:n])
-				writer.Call("write", b)
+				if _, writeErr := awaitPromiseIfSupported(writer.Call("write", b)); writeErr != nil {
+					return
+				}
 			}
 			if err != nil {
-				AwaitPromise(writer.Get("ready"))
-				writer.Call("close")
-				return
+				break
 			}
 		}
+		if _, readyErr := awaitPromiseIfSupported(writer.Get("ready")); readyErr != nil {
+			return
+		}
+		_, _ = awaitPromiseIfSupported(writer.Call("close"))
 	}(stream.Get("writable").Call("getWriter"))
 	return stream.Get("readable")
+}
+
+func awaitPromiseIfSupported(value js.Value) (js.Value, error) {
+	if value.IsUndefined() || value.IsNull() {
+		return js.Undefined(), nil
+	}
+	then := value.Get("then")
+	if then.IsUndefined() || then.IsNull() || then.Type() != js.TypeFunction {
+		return js.Undefined(), nil
+	}
+	return AwaitPromise(value)
 }
