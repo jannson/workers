@@ -41,8 +41,17 @@ func WithBinding(bind js.Value) ClientOption {
 
 // NewClient returns new Client
 func NewClient(opts ...ClientOption) *Client {
+	// In TinyGo's wasm_exec.js, js.Global() can be a Proxy used to inject a per-request `context`.
+	// Some Cloudflare runtime APIs (notably `fetch`) are strict about the receiver (`this`) and may
+	// throw "Illegal invocation" when called with the Proxy as `this`.
+	//
+	// Use the real global object when available.
+	namespace := js.Global()
+	if globalThis := namespace.Get("globalThis"); !globalThis.IsUndefined() && !globalThis.IsNull() {
+		namespace = globalThis
+	}
 	c := &Client{
-		namespace: js.Global(),
+		namespace: namespace,
 	}
 	c.applyOptions(opts)
 
